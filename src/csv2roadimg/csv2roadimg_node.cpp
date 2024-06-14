@@ -33,8 +33,8 @@ auto Csv2roadimgNode::toMat(std::ifstream && ifs)
       range = std::stod(range_str);
     }
     catch (...) {
-      ROS_ERROR("cannot convert string to double");
-      return cv::Mat();
+      ROS_WARN("cannot convert string to double");
+      continue;
     }
 
     csv_info.emplace_back(time, range);
@@ -45,12 +45,16 @@ auto Csv2roadimgNode::toMat(std::ifstream && ifs)
   }
 
   auto resolution = 0.01;
-  auto width = 2.0;
-  auto road_width = 0.3;
+  auto width = 4.0;
+  auto road_width = 0.2;
   auto speed = 1.0;
+  auto speed_max = 0.2;
+  auto time_last = 0.0;
 
   auto dissolution = 1.0 / resolution;
   int road_pixels = road_width * dissolution;
+  auto road_centor_x_last = csv_info.front().second * dissolution;
+
 
   auto roadimg = cv::Mat(
     csv_info.back().first * speed * dissolution,
@@ -60,13 +64,18 @@ auto Csv2roadimgNode::toMat(std::ifstream && ifs)
   decltype(roadimg.rows) y = 0;
   for (const auto & csv_info_pair : csv_info) {
     auto road_centor_x = csv_info_pair.second * dissolution;
+    auto duration = csv_info_pair.first - time_last;
+    auto road_centor_x_inc_limit = speed_max * duration * dissolution;
+    road_centor_x = std::min(std::max(road_centor_x, road_centor_x_last - road_centor_x_inc_limit), road_centor_x_last + road_centor_x_inc_limit);
+    time_last = csv_info_pair.first;
+    road_centor_x_last = road_centor_x;
     auto road_l_x_range = std::make_pair(
       std::max<int>(0, road_centor_x - road_pixels),
       std::min<int>(road_centor_x + road_pixels, roadimg.cols));
     auto road_r_x_range = std::make_pair(
-      roadimg.cols - 1 - road_l_x_range.second,
-      roadimg.cols - 1 - road_l_x_range.first);
-    auto y_max = csv_info_pair.first * speed * dissolution;
+      roadimg.cols - road_l_x_range.second,
+      roadimg.cols - road_l_x_range.first);
+    int y_max = csv_info_pair.first * speed * dissolution;
     while (y < y_max) {
       for (auto road_x_range : {road_l_x_range, road_r_x_range}) {
         auto ptr_zero = roadimg.ptr<cv::Vec3b>(y);
